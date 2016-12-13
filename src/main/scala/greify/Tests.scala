@@ -9,20 +9,21 @@ object Tests {
   def main(args: Array[String]) = {
     test1()
     test2()
+    test3()
+  }
+
+  class Mu[F[_]](vv: => F[Mu[F]]) {
+    lazy val v = vv
+  }
+  def mu[F[_]](v: => F[Mu[F]]) = new Mu(v)
+
+  implicit def muT[A[_]: Traverse]: MuRef.Aux[Mu[A], A] = new MuRef[Mu[A]] {
+    type Out[X] = A[X]
+    def mapDeRef[F[_]: Applicative, B](f: Mu[A] => F[B], a: Mu[A]): F[A[B]] =
+      a.v traverse f
   }
 
   def test1(): Unit = {
-
-    class Mu[F[_]](vv: => F[Mu[F]]) {
-      lazy val v = vv
-    }
-    def mu[F[_]](v: => F[Mu[F]]) = new Mu(v)
-
-    implicit def muT[A[_]: Traverse]: MuRef.Aux[Mu[A], A] = new MuRef[Mu[A]] {
-      type Out[X] = A[X]
-      def mapDeRef[F[_]: Applicative, B](f: Mu[A] => F[B], a: Mu[A]): F[A[B]] =
-        a.v traverse f
-    }
 
     sealed trait ABList[A, B] {
       def fold[T](onNil: => T, onCons: (=> A, => B) => T): T
@@ -94,5 +95,39 @@ object Tests {
           a.bs traverse (t => f(t._2) map ((t._1, _))) map (StateDeRef(a.a, _))
       }
     println(MuRef.reifyGraph(s0))
+  }
+
+  def test3(): Unit = {
+    sealed trait Val[F]
+    case class App[F](f1: F, f2: F) extends Val[F]
+    case class Prim[F](s:String) extends Val[F]
+
+    implicit def traverse : Traverse[Val] = new Traverse[Val] {
+      
+        def foldLeft[A, B](fa: Val[A], b: B)(f: (B, A) => B): B = fa match {
+          case App(a1, a2) => f(f(b, a1), a2)
+          case Prim(s) => b
+        }
+
+        def foldRight[A, B](fa: Val[A], lb: Eval[B])(f: (A, Eval[B]) => Eval[B]) = fa match {
+          case App(a1, a2) => f(a1, f(a2, lb))
+          case Prim(s) => lb
+        } 
+
+        def traverse[G[_]: Applicative, A, B](fa: Val[A])(f: A => G[B]): G[Val[B]] = fa match {
+          case App(a1, a2) => f(a1) |@| f(a2) map (App(_, _))
+          case Prim(s) => (Prim(s): Val[B]).pure[G]
+        }
+    }
+
+    type Term = Val[Mu[Val]]
+
+    def app(v1: Term, v2: Term) : Term = App(mu(v1), mu(v2))
+    def add(v1: Term, v2: Term) : Term = app(app(Prim("+"), v1), v2)
+    def mul(v1: Term, v2: Term) : Term = app(app(Prim("*"), v1), v2)
+    val x = add(Prim("2"), Prim("5"))
+    val y = mu(mul(x, x))
+
+    println(MuRef.reifyGraph(y))
   }
 }

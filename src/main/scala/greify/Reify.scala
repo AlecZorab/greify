@@ -5,7 +5,9 @@ import cats._
 import cats.implicits._
 import collection.mutable.AnyRefMap
 
-case class Graph[F[_]](edges: List[(Int, F[Int])], root: Int)
+case class Graph[F[_]](edges: Array[F[Int]], root: Int){
+  override def toString = s"Graph(${edges.mkString(", ")})"
+}
 
 case class StableName(val a: AnyRef) {
   override def hashCode = System.identityHashCode(a)
@@ -24,7 +26,7 @@ trait MuRef[A] {
 object MuRef {
   type Aux[A, B[_]] = MuRef[A] { type Out[X] = B[X] }
 
-  def reifyGraph[S <: AnyRef, F[_]](s: S)(implicit ev: MuRef.Aux[S, F]): Graph[F] = {
+  def reifyGraph[S <: AnyRef, F[_]](s: S)(implicit ev: MuRef.Aux[S, F], ev2: scala.reflect.ClassTag[F[Int]]): Graph[F] = {
     val stableNames = AnyRefMap.empty[StableName, Int]
     var indices     = List.empty[(Int, F[Int])]
     var ctr         = 1
@@ -42,6 +44,6 @@ object MuRef {
       }
     }
     val root = findNodes(s)
-    Graph(indices, root)
+    Graph(indices.sortBy(_._1).map(_._2).toArray, root)
   }
 }
